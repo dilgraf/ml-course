@@ -1,9 +1,7 @@
 from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.metrics import accuracy_score
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
 
 
@@ -17,7 +15,11 @@ def rbf(x_1, x_2, sigma=1.):
         kernel function values for all pairs of samples from x_1 and x_2
         torch.tensor of type torch.float32 shaped `(#samples_1, #samples_2)`
     '''
-    distances = ### YOUR CODE HERE
+    ### YOUR CODE HERE
+    x_1_sq = torch.sum(x_1**2, dim=1).reshape(-1, 1)
+    x_2_sq = torch.sum(x_2**2, dim=1).reshape(1, -1)
+    dists_sq = x_1_sq - 2 * torch.mm(x_1, x_2.T) + x_2_sq
+    distances = torch.exp(-dists_sq/(2*sigma**2))
     return torch.Tensor(distances).type(torch.float32)
 
 def hinge_loss(scores, labels):
@@ -25,7 +27,8 @@ def hinge_loss(scores, labels):
     '''
     assert len(scores.shape) == 1
     assert len(labels.shape) == 1
-    return ### YOUR CODE HERE
+    ### YOUR CODE HERE
+    return torch.mean(torch.clamp(1-scores*labels, min=0))
 
 
 class SVM(BaseEstimator, ClassifierMixin):
@@ -40,7 +43,8 @@ class SVM(BaseEstimator, ClassifierMixin):
             kernel function values for all pairs of samples from x_1 and x_2
             torch.tensor shaped `(#samples_1, #samples_2)` of type torch.float32
         '''
-        return ### YOUR CODE HERE
+        ### YOUR CODE HERE
+        return torch.mm(x_1, x_2.T)
     
     def __init__(
         self,
@@ -69,8 +73,9 @@ class SVM(BaseEstimator, ClassifierMixin):
         K = self.kernel_function(X, X).float()
 
         self.betas = torch.full((n_obj, 1), fill_value=0.001, dtype=X.dtype, requires_grad=True)
-        self.bias = torch.zeros(1, requires_grad=True) # I've also add bias to the model
+        self.bias = torch.zeros(1, requires_grad=True) # added bias to the model
         
+        #stochastic gradient descent to adjust betas and bias
         optimizer = optim.SGD((self.betas, self.bias), lr=self.lr)
         for epoch in range(self.epochs):
             perm = torch.randperm(n_obj)  # Generate a set of random numbers of length: sample size
@@ -82,9 +87,13 @@ class SVM(BaseEstimator, ClassifierMixin):
                 k_batch = K[batch_inds]
                 
                 optimizer.zero_grad()     # Manually zero the gradient buffers of the optimizer
-                
-                preds = ### YOUR CODE HERE # get the matrix product using SVM parameters: self.betas and self.bias
+                ### YOUR CODE HERE
+                #y = alpha * y * K + b
+                weighted_betas = self.betas * Y.view(-1, 1)
+                preds = self.bias + torch.mm(k_batch, weighted_betas) # get the matrix product using SVM parameters: self.betas and self.bias
                 preds = preds.flatten()
+                
+                #regularization (norm(w)^2 = lambda*alpha^T*alpha*K) + hinge-loss
                 loss = self.lmbd * self.betas[batch_inds].T @ k_batch @ self.betas + hinge_loss(preds, y_batch)
                 loss.backward()           # Backpropagation
                 optimizer.step()          # Optimize and adjust weights
@@ -102,7 +111,8 @@ class SVM(BaseEstimator, ClassifierMixin):
             batch = torch.from_numpy(batch).float()
             K = self.kernel_function(batch, self.X)
             # compute the margin values for every object in the batch
-            return ### YOUR CODE HERE
+            ### YOUR CODE HERE
+            return (torch.mm(K, self.betas)+self.bias).flatten()
 
     def predict(self, batch):
         scores = self.predict_scores(batch)
