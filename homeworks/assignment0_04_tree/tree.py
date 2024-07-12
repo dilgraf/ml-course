@@ -19,8 +19,8 @@ def entropy(y):
     EPS = 0.0005
 
     # YOUR CODE HERE
-    
-    return 0.
+    p = np.mean(y, axis=0)
+    return -np.sum(p*np.log(p+EPS))
     
 def gini(y):
     """
@@ -38,8 +38,8 @@ def gini(y):
     """
 
     # YOUR CODE HERE
-    
-    return 0.
+    p = np.mean(y, axis=0)
+    return 1 - np.sum(p**2)
     
 def variance(y):
     """
@@ -57,8 +57,7 @@ def variance(y):
     """
     
     # YOUR CODE HERE
-    
-    return 0.
+    return np.mean((y-np.mean(y)**2))
 
 def mad_median(y):
     """
@@ -78,7 +77,7 @@ def mad_median(y):
 
     # YOUR CODE HERE
     
-    return 0.
+    return np.mean(np.abs(y-np.median(y)))
 
 
 def one_hot_encode(n_classes, y):
@@ -114,7 +113,7 @@ class DecisionTree(BaseEstimator):
     def __init__(self, n_classes=None, max_depth=np.inf, min_samples_split=2, 
                  criterion_name='gini', debug=False):
 
-        assert criterion_name in self.all_criterions.keys(), 'Criterion name must be on of the following: {}'.format(self.all_criterions.keys())
+        assert criterion_name in self.all_criterions.keys(), 'Criterion name must be one of the following: {}'.format(self.all_criterions.keys())
         
         self.n_classes = n_classes
         self.max_depth = max_depth
@@ -149,13 +148,16 @@ class DecisionTree(BaseEstimator):
         Returns
         -------
         (X_left, y_left) : tuple of np.arrays of same type as input X_subset and y_subset
-            Part of the providev subset where selected feature x^j < threshold
+            Part of the provided subset where selected feature x^j < threshold
         (X_right, y_right) : tuple of np.arrays of same type as input X_subset and y_subset
-            Part of the providev subset where selected feature x^j >= threshold
+            Part of the provided subset where selected feature x^j >= threshold
         """
 
         # YOUR CODE HERE
-        
+        X_left = X_subset[np.argwhere(X_subset[:,feature_index]<threshold).flatten()]
+        y_left = y_subset[np.argwhere(X_subset[:,feature_index]<threshold).flatten()]
+        X_right = X_subset[np.argwhere(X_subset[:,feature_index]>=threshold).flatten()]
+        y_right = y_subset[np.argwhere(X_subset[:,feature_index]>=threshold).flatten()]
         return (X_left, y_left), (X_right, y_right)
     
     def make_split_only_y(self, feature_index, threshold, X_subset, y_subset):
@@ -189,7 +191,8 @@ class DecisionTree(BaseEstimator):
         """
 
         # YOUR CODE HERE
-        
+        y_left = y_subset[np.argwhere(X_subset[:,feature_index]<threshold).flatten()]
+        y_right = y_subset[np.argwhere(X_subset[:,feature_index]>=threshold).flatten()]
         return y_left, y_right
 
     def choose_best_split(self, X_subset, y_subset):
@@ -215,6 +218,22 @@ class DecisionTree(BaseEstimator):
 
         """
         # YOUR CODE HERE
+        inf_gain = -1
+        feature_index, threshold = None, None
+
+        for feature in range(X_subset.shape[1]):
+            thresholds = np.unique(X_subset[:, feature])
+            for thr in thresholds:
+                y_l, y_r = self.make_split_only_y(feature, thr, X_subset, y_subset)
+                h_l = self.criterion(y_l)
+                h_r = self.criterion(y_r)
+                g = self.criterion(y_subset) - (y_l.shape[0]/len(y_subset))*h_l - \
+                    (y_r.shape[0]/len(y_subset))*h_r
+                if g > inf_gain:
+                    inf_gain = g
+                    feature_index = feature
+                    threshold = thr
+
         return feature_index, threshold
     
     def make_tree(self, X_subset, y_subset):
@@ -237,9 +256,34 @@ class DecisionTree(BaseEstimator):
         """
 
         # YOUR CODE HERE
-        
+        self.depth +=1
+        #branching
+        if  (self.depth < self.max_depth) and (X_subset.shape[0] >= self.min_samples_split):
+            feature_index, threshold = self.choose_best_split(X_subset, y_subset)
+            new_node = Node(feature_index, threshold)
+            (X_l, y_l), (X_r, y_r) = self.make_split(feature_index, threshold, X_subset, y_subset)
+            new_node.left_child = self.make_tree(X_l, y_l)
+            new_node.right_child = self.make_tree(X_r, y_r)
+
+        #once there is only 1 value on the left branch -> make it a leaf
+        else:
+            #updating value on the leaf
+            new_node = Node(0,0)
+            if self.classification:
+                #the most common class label
+                new_node.value = np.argmax(np.sum(y_subset, axis=0))
+                new_node.proba = np.mean(y_subset, axis=0)
+
+            else:
+                #In regression it is the desired constant
+                if self.criterion == 'variance':
+                    new_node.value = np.mean(y_subset)
+                elif self.criterion == 'mad_median':
+                    new_node.value = np.median(y_subset)
+        #going back to deal with the right side
+        self.depth -=1
         return new_node
-        
+
     def fit(self, X, y):
         """
         Fit the model from scratch using the provided data
@@ -281,8 +325,14 @@ class DecisionTree(BaseEstimator):
         """
 
         # YOUR CODE HERE
-        
-        return y_predicted
+        def pred(x, node):
+            if node.left_child is None:
+                return node.value
+            if x[node.feature_index]<node.value:
+                return pred(x, node.left_child)
+            return pred(x, node.right_child)
+
+        return np.array([pred(x, self.root) for x in X])
         
     def predict_proba(self, X):
         """
@@ -303,5 +353,12 @@ class DecisionTree(BaseEstimator):
         assert self.classification, 'Available only for classification problem'
 
         # YOUR CODE HERE
-        
-        return y_predicted_probs
+        def pred(x, node):
+            if node.left_child is None:
+                print(node.proba)
+                return node.proba
+            if x[node.feature_index]<node.value:
+                return pred(x, node.left_child)
+            return pred(x, node.right_child)
+                        
+        return np.array([pred(x, self.root) for x in X])
